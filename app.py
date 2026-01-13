@@ -1,13 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import altair as alt
 
 from optimization import compute_cost_and_emissions, score_routes
 from map_utils import draw_routes_map
 from multimodal import ORSClient
 
-# --- UI setup ---
 st.set_page_config(page_title="Multi‑Modal Route Optimizer", layout="wide")
 
 # Inject CSS
@@ -32,7 +31,7 @@ else:
 st.markdown('<div class="header-gradient">🧭 Multi‑Modal Route Optimizer</div>', unsafe_allow_html=True)
 st.caption("Find & evaluate road routes by Distance, Time, Cost, CO₂ — with a recommended path highlighted")
 
-# --- Sidebar ---
+# Sidebar
 st.sidebar.header("Global Configuration")
 use_static = st.sidebar.checkbox("Use static points", value=True)
 static_from = {
@@ -82,7 +81,7 @@ if not ORS_API_KEY:
 
 run = st.sidebar.button("🔎 Compute & Optimize")
 
-# --- Session state ---
+# Session state
 for key in ["routes", "df", "scored_df", "best_idx", "origin", "dest", "message"]:
     if key not in st.session_state:
         st.session_state[key] = None
@@ -133,22 +132,19 @@ if run:
     except Exception as e:
         st.session_state.message = f"Unexpected error: {e}"
 
-# --- Layout blocks ---
+# Layout blocks
 if st.session_state.message:
     st.error(st.session_state.message)
 
 if st.session_state.routes and st.session_state.scored_df is not None:
-    # All Available Routes
     st.subheader("All Available Routes")
     df = st.session_state.scored_df.copy()
-    # Tag badges
     df["Tag"] = np.where(df["tag"] == "recommended", "<span class='badge recommended'>Recommended</span>", "<span class='badge alt'>Alt</span>")
     disp = df[["Route", "distance_km", "duration_min", "cost_inr", "emissions_kg", "roads_summary", "score", "Tag"]]
     st.write("<div class='table-note'>Scores reflect your sidebar weights (MinMax). Lower is better.</div>", unsafe_allow_html=True)
     st.write(disp.to_html(escape=False, index=False), unsafe_allow_html=True)
     st.markdown("<hr class='hr-soft'>", unsafe_allow_html=True)
 
-    # Recommended cards
     st.subheader("Recommended Route")
     best_row = df.iloc[0]
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -160,27 +156,19 @@ if st.session_state.routes and st.session_state.scored_df is not None:
 
     st.markdown("<hr class='hr-soft'>", unsafe_allow_html=True)
 
-    # Map Visualization
     st.subheader("Route Visualization")
     rec_route_id = int(best_row["Route"]) if st.session_state.best_idx != -1 else 0
     draw_routes_map(st.session_state.origin, st.session_state.dest, st.session_state.routes, rec_route_id)
 
     st.markdown("<hr class='hr-soft'>", unsafe_allow_html=True)
 
-    # Route Analytics — simple horizontal bar charts
     st.subheader("Route Analytics")
-    metrics = ["distance_km", "duration_min", "cost_inr", "emissions_kg"]
-    fig, axs = plt.subplots(2, 2, figsize=(10, 6))
-    axs = axs.flatten()
-    for i, m in enumerate(metrics):
-        vals = df[m].values
-        axs[i].barh(df["Route"].astype(str).values, vals, color=["#3b82f6" if int(r)==rec_route_id else "#64748b" for r in df["Route"].values])
-        axs[i].set_xlabel(m.replace('_', ' '))
-        axs[i].set_ylabel("Route")
-        axs[i].grid(axis='x', linestyle='--', alpha=0.3)
-    st.pyplot(fig)
+    # Altair horizontal bars comparing metrics
+    base = alt.Chart(df).encode(y=alt.Y('Route:N', sort=None))
+    for field, title in [("distance_km","Distance (km)"),("duration_min","Time (min)"),("cost_inr","Cost (₹)"),("emissions_kg","CO₂ (kg)")]:
+        chart = base.mark_bar().encode(x=alt.X(f'{field}:Q', title=title), color=alt.Color('Route:N', legend=None))
+        st.altair_chart(chart.properties(height=200), use_container_width=True)
 
-    # Recommended turn-by-turn
     st.subheader("Turn‑by‑turn (Road Names) — Recommended")
     steps_df = pd.DataFrame(st.session_state.routes[rec_route_id].get("steps", []))
     if not steps_df.empty:
